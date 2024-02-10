@@ -52,7 +52,8 @@ app.get("/api/citizens/:id", (req, res) => {
     ARRAY_AGG(DISTINCT jsonb_build_object('release_date', militaries.release_date, 'military_serial', militaries.military_serial, 'comment', militaries.comment)) AS militaries,
     personal_files.feasibility_category,
     personal_files.deferment_end_date,
-    ARRAY_AGG(DISTINCT jsonb_build_object('type', record_history.type, 'date', record_history.date, 'department', jsonb_build_object('name', departments.name, 'address', departments.address))) AS records
+    ARRAY_AGG(DISTINCT jsonb_build_object('type', record_history.type, 'date', record_history.date, 'department', jsonb_build_object('name', departments.name, 'address', departments.address))) AS records,
+    ARRAY_AGG(DISTINCT jsonb_build_object('id', actions.id, 'type', actions.type, 'user_email', users.email)) AS actions
   FROM  
     citizens
   LEFT JOIN  
@@ -63,12 +64,17 @@ app.get("/api/citizens/:id", (req, res) => {
     record_history ON personal_files.id = record_history.personal_file_id
   LEFT JOIN   
   departments ON record_history.department_id = departments.id
+  LEFT JOIN
+  actions ON actions.citizen_id = citizens.id
+  LEFT JOIN
+  users ON actions.user_id = users.id
   WHERE
-	citizens.id = ${id}
+    citizens.id = ${id}
   GROUP BY
    citizens.id,
    personal_files.feasibility_category,
    personal_files.deferment_end_date
+  
   `,
     (error, results) => {
       if (error) {
