@@ -1,8 +1,8 @@
 {
-    "user": "",
+  "user": "postgres",
   "host": "localhost",
-  "database": "",
-  "password": "",
-  "db_port": "",
+  "database": "military_table",
+  "password": "1234",
+  "db_port": "5432",
   "port": "3000"
 }
