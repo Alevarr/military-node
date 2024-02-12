@@ -1,5 +1,7 @@
+const Joi = require("joi");
 const config = require("config");
 const cors = require("cors");
+const jwt = require("jsonwebtoken");
 const express = require("express");
 const Pool = require("pg").Pool;
 
@@ -81,6 +83,36 @@ app.get("/api/citizens/:id", (req, res) => {
         throw error;
       }
       res.send(results.rows[0]);
+    }
+  );
+});
+
+app.post("/api/auth", (req, res) => {
+  const schema = Joi.object({
+    email: Joi.string().min(5).max(255).required().email(),
+    password: Joi.string().min(5).max(255).required(),
+  });
+
+  const { error } = schema.validate(req.body);
+  if (error) return res.status(400).send(error.details[0].message);
+
+  pool.query(
+    `SELECT email, password FROM users WHERE email=$1`,
+    [req.body.email],
+    (error, results) => {
+      if (error) console.log(error);
+      if (results.rows[0].password !== req.body.password)
+        return res.status(400).send("Invalid email or password.");
+
+      const token = jwt.sign(
+        {
+          email: this.email,
+          role: this.isAdmin,
+        },
+        config.get("jwtPrivateKey"),
+        { expiresIn: "2m" }
+      );
+      res.send(token);
     }
   );
 });

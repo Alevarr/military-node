@@ -4,5 +4,6 @@
   "database": "military_table",
   "password": "1234",
   "db_port": "5432",
-  "port": "3000"
+  "port": "3000",
+  "jwtPrivateKey": "aboba"
 }
