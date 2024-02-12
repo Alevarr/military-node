@@ -2,6 +2,7 @@ const Joi = require("joi");
 const config = require("config");
 const cors = require("cors");
 const jwt = require("jsonwebtoken");
+const auth = require("./middleware/auth");
 const express = require("express");
 const Pool = require("pg").Pool;
 
@@ -97,17 +98,17 @@ app.post("/api/auth", (req, res) => {
   if (error) return res.status(400).send(error.details[0].message);
 
   pool.query(
-    `SELECT email, password FROM users WHERE email=$1`,
+    `SELECT id, email, password, role FROM users WHERE email=$1`,
     [req.body.email],
     (error, results) => {
       if (error) console.log(error);
       if (results.rows[0].password !== req.body.password)
         return res.status(400).send("Invalid email or password.");
-
       const token = jwt.sign(
         {
-          email: this.email,
-          role: this.isAdmin,
+          id: results.rows[0].id,
+          email: results.rows[0].email,
+          role: results.rows[0].role,
         },
         config.get("jwtPrivateKey"),
         { expiresIn: "2m" }
@@ -115,6 +116,87 @@ app.post("/api/auth", (req, res) => {
       res.send(token);
     }
   );
+});
+
+app.post("/api/citizens", auth, async (req, res) => {
+  const schema = Joi.object({
+    last_name: Joi.string().min(1).max(255).required(),
+    first_name: Joi.string().min(1).max(255).required(),
+    middle_name: Joi.string().min(1).max(255).optional(),
+    passport: Joi.string()
+      .pattern(/^\d{10}$/)
+      .required(),
+    feasibility_category: Joi.string()
+      .valid("А", "Б", "В", "Г", "Д")
+      .required(),
+    deferment_end_date: Joi.date().required(),
+  });
+
+  const { error } = schema.validate(req.body);
+  if (error) return res.status(400).send(error.details[0].message);
+
+  if (req.user.role !== "editor") return res.status(401).send("Access denied.");
+
+  try {
+    // Start a transaction
+    await pool.query("BEGIN");
+
+    const {
+      last_name,
+      first_name,
+      middle_name,
+      passport,
+      feasibility_category,
+      deferment_end_date,
+    } = req.body;
+    const defermentEndDateObject = new Date(deferment_end_date);
+
+    if (isNaN(defermentEndDateObject)) {
+      return res.status(400).send("Invalid deferment_end_date format");
+    }
+
+    const formattedDefermentEndDate = defermentEndDateObject.toISOString();
+
+    //Insert into personal_files table
+    const insertFileQuery = `INSERT INTO personal_files (feasibility_category, deferment_end_date) VALUES ($1, $2) RETURNING id`;
+    const fileValues = [feasibility_category, formattedDefermentEndDate];
+    const fileResult = await pool.query(insertFileQuery, fileValues);
+    const insertedFileId = fileResult.rows[0].id;
+
+    // Insert into citizens table
+    const insertCitizenQuery = `
+      INSERT INTO citizens (last_name, first_name, middle_name, passport, personal_file_id)
+      VALUES ($1, $2, $3, $4, $5)
+      RETURNING id`;
+    const citizenValues = [
+      last_name,
+      first_name,
+      middle_name,
+      passport,
+      insertedFileId,
+    ];
+    const citizenResult = await pool.query(insertCitizenQuery, citizenValues);
+    const insertedCitizenId = citizenResult.rows[0].id;
+
+    // Insert into actions table
+    const insertActionQuery = `
+      INSERT INTO actions (user_id, type, citizen_id)
+      VALUES ($1, $2, $3)`;
+    const actionValues = [req.user.id, "add", insertedCitizenId];
+    await pool.query(insertActionQuery, actionValues);
+
+    // Commit the transaction
+    await pool.query("COMMIT");
+
+    res.status(201).json({
+      message: "Citizen added successfully",
+      citizenId: insertedCitizenId,
+    });
+  } catch (err) {
+    // Rollback the transaction in case of error
+    await pool.query("ROLLBACK");
+    res.status(500).send("Server error");
+  }
 });
 
 const port = process.env.PORT || config.get("port");
