@@ -61,7 +61,7 @@ app.get("/api/citizens/:id", (req, res) => {
     citizens.middle_name,
     citizens.last_name,
     citizens.passport,
-    ARRAY_AGG(DISTINCT jsonb_build_object('id', militaries.id, 'release_date', militaries.release_date, 'military_serial', militaries.military_serial, 'comment', militaries.comment)) AS militaries,
+    ARRAY_AGG(DISTINCT jsonb_build_object('id', militaries.id, 'release_date', militaries.release_date, 'military_serial', militaries.military_serial, 'comment', militaries.comment, 'citizen_id', militaries.citizen_id)) AS militaries,
     personal_files.feasibility_category,
     personal_files.deferment_end_date,
     ARRAY_AGG(DISTINCT jsonb_build_object('id', record_history.id, 'type', record_history.type, 'date', record_history.date, 'department', jsonb_build_object('name', departments.name, 'address', departments.address))) AS records,
@@ -365,6 +365,67 @@ app.post("/api/militaries", auth, async (req, res) => {
     res.status(201).json({
       message: "Military added successfully",
       military_id: insertedMilitaryId,
+    });
+  } catch (err) {
+    // Rollback the transaction in case of error
+    await pool.query("ROLLBACK");
+    console.log(err);
+    res.status(500).send("Server error");
+  }
+});
+app.put("/api/militaries/:id", auth, async (req, res) => {
+  const military_id = Number(req.params.id);
+
+  const schema = Joi.object({
+    military_serial: Joi.string()
+      .pattern(/^[А-Я]{2}\d{7}$/)
+      .required(),
+    comment: Joi.string().min(1).optional(),
+    release_date: Joi.date().required(),
+  });
+
+  const { error } = schema.validate(req.body);
+  if (error) return res.status(400).send(error.details[0].message);
+
+  if (req.user.role !== "editor") return res.status(401).send("Access denied.");
+
+  try {
+    // Start a transaction
+    await pool.query("BEGIN");
+
+    const { military_serial, comment, release_date } = req.body;
+    const releaseDateObject = new Date(release_date);
+
+    if (isNaN(releaseDateObject)) {
+      return res.status(400).send("Invalid release_date format");
+    }
+
+    const formattedReleaseDate = releaseDateObject.toISOString();
+
+    //Insert into personal_files table
+    const updateMilitaryQuery = `UPDATE militaries SET military_serial = $1, comment = $2, release_date = $3 WHERE id = $4  RETURNING *`;
+    const militaryValues = [
+      military_serial,
+      comment,
+      formattedReleaseDate,
+      military_id,
+    ];
+    const militaryResult = (
+      await pool.query(updateMilitaryQuery, militaryValues)
+    ).rows[0];
+
+    // Insert into actions table
+    const insertActionQuery = `
+      INSERT INTO actions (user_id, type, citizen_id)
+      VALUES ($1, $2, $3)`;
+    const actionValues = [req.user.id, "edit", militaryResult.citizen_id];
+    await pool.query(insertActionQuery, actionValues);
+
+    // Commit the transaction
+    await pool.query("COMMIT");
+
+    res.status(201).json({
+      ...militaryResult,
     });
   } catch (err) {
     // Rollback the transaction in case of error
