@@ -97,6 +97,98 @@ app.get("/api/citizens/:id", (req, res) => {
   );
 });
 
+app.put("/api/citizens/:id", auth, async (req, res) => {
+  const citizen_id = Number(req.params.id);
+
+  const schema = Joi.object({
+    last_name: Joi.string().min(1).max(255).required(),
+    first_name: Joi.string().min(1).max(255).required(),
+    middle_name: Joi.string().min(1).max(255).optional(),
+    passport: Joi.string()
+      .pattern(/^\d{10}$/)
+      .required(),
+    feasibility_category: Joi.string()
+      .valid("А", "Б", "В", "Г", "Д")
+      .required(),
+    deferment_end_date: Joi.date().required(),
+  });
+
+  const { error } = schema.validate(req.body);
+  if (error) return res.status(400).send(error.details[0].message);
+
+  if (req.user.role !== "editor") return res.status(401).send("Access denied.");
+
+  try {
+    // Start a transaction
+    await pool.query("BEGIN");
+
+    const {
+      last_name,
+      first_name,
+      middle_name,
+      passport,
+      feasibility_category,
+      deferment_end_date,
+    } = req.body;
+    const defermentEndDateObject = new Date(deferment_end_date);
+
+    if (isNaN(defermentEndDateObject)) {
+      return res.status(400).send("Invalid deferment_end_date format");
+    }
+
+    const formattedDefermentEndDate = defermentEndDateObject.toISOString();
+
+    const selectCitizenQuery = `SELECT * FROM citizens WHERE id = $1`;
+    const citizenValues = [citizen_id];
+    const citizenResult = await pool.query(selectCitizenQuery, citizenValues);
+    if (!citizenResult.rows[0].id) return res.status(400).send("Bad request");
+    const personalFileId = citizenResult.rows[0].personal_file_id;
+
+    //Insert into personal_files table
+    const insertFileQuery = `UPDATE personal_files SET feasibility_category = $1, deferment_end_date = $2 WHERE id = $3 RETURNING *`;
+    const fileValues = [
+      feasibility_category,
+      formattedDefermentEndDate,
+      personalFileId,
+    ];
+    await pool.query(insertFileQuery, fileValues);
+
+    // Insert into citizens table
+    const updateCitizenQuery = `
+      UPDATE citizens SET last_name = $1, first_name = $2, middle_name = $3, passport = $4
+      WHERE id = $5
+      RETURNING *`;
+    const updateCitizenValues = [
+      last_name,
+      first_name,
+      middle_name,
+      passport,
+      citizen_id,
+    ];
+    await pool.query(updateCitizenQuery, updateCitizenValues);
+
+    // Insert into actions table
+    const insertActionQuery = `
+      INSERT INTO actions (user_id, type, citizen_id)
+      VALUES ($1, $2, $3)`;
+    const actionValues = [req.user.id, "edit", citizen_id];
+    await pool.query(insertActionQuery, actionValues);
+
+    // Commit the transaction
+    await pool.query("COMMIT");
+
+    res.status(201).json({
+      message: "Citizen edited successfully",
+      citizenId: citizen_id,
+    });
+  } catch (err) {
+    // Rollback the transaction in case of error
+    await pool.query("ROLLBACK");
+    console.log(err);
+    res.status(500).send("Server error");
+  }
+});
+
 app.post("/api/auth", (req, res) => {
   const schema = Joi.object({
     email: Joi.string().min(5).max(255).required().email(),
