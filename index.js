@@ -64,7 +64,7 @@ app.get("/api/citizens/:id", (req, res) => {
     ARRAY_AGG(DISTINCT jsonb_build_object('id', militaries.id, 'release_date', militaries.release_date, 'military_serial', militaries.military_serial, 'comment', militaries.comment, 'citizen_id', militaries.citizen_id)) AS militaries,
     personal_files.feasibility_category,
     personal_files.deferment_end_date,
-    ARRAY_AGG(DISTINCT jsonb_build_object('id', record_history.id, 'type', record_history.type, 'date', record_history.date, 'department', jsonb_build_object('name', departments.name, 'address', departments.address))) AS records,
+    ARRAY_AGG(DISTINCT jsonb_build_object('id', record_history.id, 'type', record_history.type, 'date', record_history.date, 'department', jsonb_build_object('id', departments.id, 'name', departments.name, 'address', departments.address))) AS records,
     ARRAY_AGG(DISTINCT jsonb_build_object('id', actions.id, 'type', actions.type, 'user_email', users.email)) AS actions
   FROM  
     citizens
@@ -484,6 +484,64 @@ app.post("/api/records", auth, async (req, res) => {
     res.status(201).json({
       message: "Reocrd added successfully",
       record_id: insertedRecordId,
+    });
+  } catch (err) {
+    // Rollback the transaction in case of error
+    await pool.query("ROLLBACK");
+    console.log(err);
+    res.status(500).send("Server error");
+  }
+});
+
+app.put("/api/records/:id", auth, async (req, res) => {
+  const record_id = Number(req.params.id);
+
+  const schema = Joi.object({
+    type: Joi.string().valid("registered", "removed").required(),
+    department_id: Joi.number().required(),
+    date: Joi.date().required(),
+  });
+
+  const { error } = schema.validate(req.body);
+  if (error) return res.status(400).send(error.details[0].message);
+
+  if (req.user.role !== "editor") return res.status(401).send("Access denied.");
+
+  try {
+    // Start a transaction
+    await pool.query("BEGIN");
+
+    const { type, department_id, date } = req.body;
+    const dateObject = new Date(date);
+
+    if (isNaN(dateObject)) {
+      return res.status(400).send("Invalid release_date format");
+    }
+
+    const formattedDate = dateObject.toISOString();
+
+    const updateRecordQuery = `UPDATE record_history SET type = $1, department_id = $2, date = $3 WHERE id = $4 RETURNING *`;
+    const recordValues = [type, department_id, formattedDate, record_id];
+    const recordResult = (await pool.query(updateRecordQuery, recordValues))
+      .rows[0];
+    const personalFileId = recordResult.personal_file_id;
+
+    const selectCitizenQuery = `SELECT * FROM citizens WHERE personal_file_id = $1`;
+    const citizenValues = [personalFileId];
+    const citizenResult = await pool.query(selectCitizenQuery, citizenValues);
+    const citizenId = citizenResult.rows[0].id;
+
+    const insertActionQuery = `
+      INSERT INTO actions (user_id, type, citizen_id)
+      VALUES ($1, $2, $3)`;
+    const actionValues = [req.user.id, "edit", citizenId];
+    await pool.query(insertActionQuery, actionValues);
+
+    // Commit the transaction
+    await pool.query("COMMIT");
+
+    res.status(201).json({
+      ...recordResult,
     });
   } catch (err) {
     // Rollback the transaction in case of error
