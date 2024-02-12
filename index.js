@@ -43,6 +43,15 @@ app.get("/api/citizens", (req, res) => {
   );
 });
 
+app.get("/api/departments", (req, res) => {
+  pool.query("SELECT * FROM departments", (error, results) => {
+    if (error) {
+      throw error;
+    }
+    res.send(results.rows);
+  });
+});
+
 app.get("/api/citizens/:id", (req, res) => {
   const id = req.params.id;
   pool.query(
