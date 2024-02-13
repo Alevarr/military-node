@@ -189,6 +189,40 @@ app.put("/api/citizens/:id", auth, async (req, res) => {
   }
 });
 
+app.delete("/api/citizens/:id", auth, async (req, res) => {
+  const citizen_id = Number(req.params.id);
+
+  if (req.user.role !== "editor") return res.status(401).send("Access denied.");
+
+  try {
+    // Start a transaction
+    await pool.query("BEGIN");
+
+    const selectCitizenQuery = `SELECT * FROM citizens WHERE id = $1`;
+    const citizenValues = [citizen_id];
+    const citizenResult = await pool.query(selectCitizenQuery, citizenValues);
+    if (!citizenResult.rows[0].id) return res.status(400).send("Bad request");
+    const personalFileId = citizenResult.rows[0].personal_file_id;
+
+    const deleteFileQuery = `DELETE FROM personal_files WHERE id = $1`;
+    const fileValues = [personalFileId];
+    await pool.query(deleteFileQuery, fileValues);
+
+    // Commit the transaction
+    await pool.query("COMMIT");
+
+    res.status(201).json({
+      message: "Citizen deleted successfully",
+      citizenId: citizen_id,
+    });
+  } catch (err) {
+    // Rollback the transaction in case of error
+    await pool.query("ROLLBACK");
+    console.log(err);
+    res.status(500).send("Server error");
+  }
+});
+
 app.post("/api/auth", (req, res) => {
   const schema = Joi.object({
     email: Joi.string().min(5).max(255).required().email(),
