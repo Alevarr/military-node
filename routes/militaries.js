@@ -135,4 +135,26 @@ router.put("/:id", auth, async (req, res) => {
   }
 });
 
+router.delete('/:id', auth, async (req, res) => {
+  const military_id = Number(req.params.id);
+
+  if (req.user.role !== "editor") return res.status(401).send("Access denied.");
+
+  try {
+    const deleteMilitaryQuery = `DELETE FROM militaries WHERE id = $1 RETURNING id`;
+    const militaryValues = [military_id];
+    const militaryResult = await pool.query(deleteMilitaryQuery, militaryValues);
+    const deletedMilitaryId = militaryResult.rows[0].id
+
+    res.status(201).json({
+      message: "Military deleted successfully",
+      militaryId: deletedMilitaryId,
+    });
+  } catch(err) {
+    console.log(err)
+    res.status(500).send("Server error")
+  }
+
+})
+
 module.exports = router;
