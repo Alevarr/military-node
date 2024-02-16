@@ -120,4 +120,25 @@ router.put("/:id", auth, async (req, res) => {
   }
 });
 
+router.delete("/:id", auth, async (req, res) => {
+  const record_id = Number(req.params.id);
+
+  if (req.user.role !== "editor") return res.status(401).send("Access denied.");
+
+  try {
+    const deleteRecordQuery = `DELETE FROM record_history WHERE id = $1 RETURNING id`;
+    const recordValues = [record_id];
+    const recordResult = await pool.query(deleteRecordQuery, recordValues);
+    const deletedRecordId = recordResult.rows[0].id;
+
+    res.status(201).json({
+      message: "Record deleted successfully",
+      militaryId: deletedRecordId,
+    });
+  } catch (err) {
+    console.log(err);
+    res.status(500).send("Server error");
+  }
+});
+
 module.exports = router;
