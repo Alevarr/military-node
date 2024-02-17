@@ -20,9 +20,6 @@ router.post("/", auth, async (req, res) => {
   if (req.user.role !== "editor") return res.status(401).send("Access denied.");
 
   try {
-    // Start a transaction
-    await pool.query("BEGIN");
-
     const { citizen_id, military_serial, comment, release_date } = req.body;
     const releaseDateObject = new Date(release_date);
 
@@ -31,6 +28,9 @@ router.post("/", auth, async (req, res) => {
     }
 
     const formattedReleaseDate = releaseDateObject.toISOString();
+
+    await pool.query(`BEGIN WORK;
+    LOCK TABLE militaries IN SHARE UPDATE EXCLUSIVE MODE;`);
 
     const selectCitizenQuery = `SELECT * FROM citizens WHERE id = $1`;
     const citizenValues = [citizen_id];
@@ -49,6 +49,10 @@ router.post("/", auth, async (req, res) => {
       insertMilitaryQuery,
       militaryValues
     );
+    if (militaryResult.error) {
+      console.log(error);
+      res.status(500).send("Server error");
+    }
     const insertedMilitaryId = militaryResult.rows[0].id;
 
     // Insert into actions table
@@ -56,18 +60,19 @@ router.post("/", auth, async (req, res) => {
         INSERT INTO actions (user_id, type, citizen_id)
         VALUES ($1, $2, $3)`;
     const actionValues = [req.user.id, "edit", citizen_id];
-    await pool.query(insertActionQuery, actionValues);
+    const actionResult = await pool.query(insertActionQuery, actionValues);
+    if (actionResult.error) {
+      console.log(error);
+      res.status(500).send("Server error");
+    }
 
-    // Commit the transaction
-    await pool.query("COMMIT");
+    await pool.query("COMMIT WORK;");
 
     res.status(201).json({
       message: "Military added successfully",
       military_id: insertedMilitaryId,
     });
   } catch (err) {
-    // Rollback the transaction in case of error
-    await pool.query("ROLLBACK");
     console.log(err);
     res.status(500).send("Server error");
   }
@@ -135,7 +140,7 @@ router.put("/:id", auth, async (req, res) => {
   }
 });
 
-router.delete('/:id', auth, async (req, res) => {
+router.delete("/:id", auth, async (req, res) => {
   const military_id = Number(req.params.id);
 
   if (req.user.role !== "editor") return res.status(401).send("Access denied.");
@@ -143,18 +148,20 @@ router.delete('/:id', auth, async (req, res) => {
   try {
     const deleteMilitaryQuery = `DELETE FROM militaries WHERE id = $1 RETURNING id`;
     const militaryValues = [military_id];
-    const militaryResult = await pool.query(deleteMilitaryQuery, militaryValues);
-    const deletedMilitaryId = militaryResult.rows[0].id
+    const militaryResult = await pool.query(
+      deleteMilitaryQuery,
+      militaryValues
+    );
+    const deletedMilitaryId = militaryResult.rows[0].id;
 
     res.status(201).json({
       message: "Military deleted successfully",
       militaryId: deletedMilitaryId,
     });
-  } catch(err) {
-    console.log(err)
-    res.status(500).send("Server error")
+  } catch (err) {
+    console.log(err);
+    res.status(500).send("Server error");
   }
-
-})
+});
 
 module.exports = router;
