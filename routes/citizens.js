@@ -108,7 +108,6 @@ router.put("/:id", auth, async (req, res) => {
     if (!citizenResult.rows[0].id) return res.status(400).send("Bad request");
     const personalFileId = citizenResult.rows[0].personal_file_id;
 
-    //Insert into personal_files table
     const insertFileQuery = `UPDATE personal_files SET feasibility_category = $1, deferment_end_date = $2 WHERE id = $3 RETURNING *`;
     const fileValues = [
       feasibility_category,
@@ -117,7 +116,6 @@ router.put("/:id", auth, async (req, res) => {
     ];
     await pool.query(insertFileQuery, fileValues);
 
-    // Insert into citizens table
     const updateCitizenQuery = `
         UPDATE citizens SET last_name = $1, first_name = $2, middle_name = $3, passport = $4
         WHERE id = $5
