@@ -28,6 +28,10 @@ async function insertRecord(connection, req, res) {
   try {
     const { citizen_id, type, department_id, date } = req.body;
 
+    if (!config.get("testConcurrentAccess")) {
+      await connection.query(`BEGIN WORK;
+    LOCK TABLE record_history IN SHARE UPDATE EXCLUSIVE MODE;`);
+    }
     const dateObject = new Date(date);
 
     if (isNaN(dateObject)) {
@@ -71,6 +75,9 @@ async function insertRecord(connection, req, res) {
     if (actionsResult.error) {
       console.log(error);
       res.status(500).send("Server error");
+    }
+    if (!config.get("testConcurrentAccess")) {
+      await connection.query("COMMIT WORK;");
     }
   } catch (err) {
     console.log(err);
