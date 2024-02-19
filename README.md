@@ -23,5 +23,7 @@
 
 ## Usage
 
+In order to configure db connection take a look at /config/default.js
+
 Run:
 `node index.js`
