@@ -4,7 +4,7 @@ const pool = require("../db");
 const express = require("express");
 const router = express.Router();
 
-router.get("/", (req, res) => {
+router.get("/", auth, (req, res) => {
   pool.query(
     "SELECT citizens.id, citizens.first_name, citizens.middle_name, citizens.last_name, citizens.passport, personal_files.feasibility_category, personal_files.deferment_end_date FROM citizens JOIN personal_files ON citizens.personal_file_id = personal_files.id;",
     (error, results) => {
@@ -196,7 +196,7 @@ router.post("/", auth, async (req, res) => {
     feasibility_category: Joi.string()
       .valid("А", "Б", "В", "Г", "Д")
       .required(),
-    deferment_end_date: Joi.date().required(),
+    deferment_end_date: Joi.date().optional(),
   });
 
   const { error } = schema.validate(req.body);
@@ -216,13 +216,9 @@ router.post("/", auth, async (req, res) => {
       feasibility_category,
       deferment_end_date,
     } = req.body;
-    const defermentEndDateObject = new Date(deferment_end_date);
+    const defermentEndDateObject = deferment_end_date ? new Date(deferment_end_date) : undefined;
 
-    if (isNaN(defermentEndDateObject)) {
-      return res.status(400).send("Invalid deferment_end_date format");
-    }
-
-    const formattedDefermentEndDate = defermentEndDateObject.toISOString();
+    const formattedDefermentEndDate =  defermentEndDateObject ? defermentEndDateObject.toISOString() : undefined;
 
     //Insert into personal_files table
     const insertFileQuery = `INSERT INTO personal_files (feasibility_category, deferment_end_date) VALUES ($1, $2) RETURNING id`;
